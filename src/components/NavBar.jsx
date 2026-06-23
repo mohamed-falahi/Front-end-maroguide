@@ -3,7 +3,16 @@ import { useAuth } from "../contexts/AuthContext";
 import { useData } from "../contexts/DataContext";
 import { MOCK_CITIES } from "../constants/mockData";
 
-export function NavBar({ page, setPage, cityFilter, setCityFilter, categoryFilter, setCategoryFilter, onAuthClick }) {
+export function NavBar({
+    page,
+    setPage,
+    cityFilter,
+    setCityFilter,
+    categoryFilter,
+    setCategoryFilter,
+    onAuthClick,
+    onProfileClick // Add this new prop
+}) {
     const { user, logout } = useAuth();
     const { cities, categories } = useData();
     const [cityOpen, setCityOpen] = useState(false);
@@ -33,6 +42,15 @@ export function NavBar({ page, setPage, cityFilter, setCityFilter, categoryFilte
         }
     };
 
+    const handleProfileClick = () => {
+        if (onProfileClick) {
+            onProfileClick();
+        } else if (user) {
+            // Fallback: if onProfileClick is not provided, navigate to profile page
+            setPage("profile");
+        }
+    };
+
     return (
         <nav className="navbar">
             <div className="logo-section" onClick={() => {
@@ -41,7 +59,6 @@ export function NavBar({ page, setPage, cityFilter, setCityFilter, categoryFilte
                 setCategoryFilter("all");
             }}>
                 <img src="/image/logo.png" alt="Maroguide" className="logo-image" />
-
             </div>
 
             <div className="search-container">
@@ -73,7 +90,7 @@ export function NavBar({ page, setPage, cityFilter, setCityFilter, categoryFilte
                 {user && (
                     <button
                         className={`nav-link ${page === "profile" ? "active" : ""}`}
-                        onClick={() => setPage("profile")}
+                        onClick={handleProfileClick}
                     >
                         Profile
                     </button>

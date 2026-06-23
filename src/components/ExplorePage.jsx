@@ -6,6 +6,20 @@ import { PostCard } from "./PostCard";
 import { Sidebar } from "./Sidebar";
 import { api } from "../services/api";
 
+// Add API base URL and helper function
+const API_BASE_URL = "http://127.0.0.1:8000";
+
+const getImageUrl = (path) => {
+    if (!path) return null;
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+        return path;
+    }
+    if (path.startsWith('/storage/')) {
+        return `${API_BASE_URL}${path}`;
+    }
+    return `${API_BASE_URL}/storage/${path}`;
+};
+
 export function ExplorePage({ cityFilter, onOpenModal }) {
     const { posts, loading, likePost, deletePost } = useData();
     const { user, token } = useAuth();
@@ -36,7 +50,7 @@ export function ExplorePage({ cityFilter, onOpenModal }) {
         }
 
         try {
-            await api.authPost(`/posts/${postId}/comment`, {
+            const response = await api.authPost(`/posts/${postId}/comment`, {
                 content: commentText
             }, token);
 
@@ -49,7 +63,7 @@ export function ExplorePage({ cityFilter, onOpenModal }) {
                 )
             );
 
-            return { success: true };
+            return { success: true, data: response.data || response.comment };
         } catch (error) {
             console.error("Error posting comment:", error);
             return { success: false };
@@ -70,7 +84,12 @@ export function ExplorePage({ cityFilter, onOpenModal }) {
             setLocalPosts(prevPosts =>
                 prevPosts.map(post =>
                     post.id === postId
-                        ? { ...post, likes_count: (post.likes_count || 0) + 1, is_liked: true }
+                        ? {
+                            ...post,
+                            likes_count: (post.likes_count || 0) + 1,
+                            is_liked: true,
+                            liked: true
+                        }
                         : post
                 )
             );
@@ -103,7 +122,21 @@ export function ExplorePage({ cityFilter, onOpenModal }) {
     // Update local posts when context posts change
     useEffect(() => {
         if (posts && posts.length > 0) {
-            setLocalPosts(posts);
+            // Process posts to ensure media URLs are correct
+            const processedPosts = posts.map(post => ({
+                ...post,
+                media: post.media && post.media.length > 0
+                    ? post.media.map(m => getImageUrl(m))
+                    : [],
+                // If media is stored as JSON string, parse it
+                media_raw: post.media_raw || post.media,
+                user: post.user ? {
+                    ...post.user,
+                    avatar: post.user.avatar ? getImageUrl(post.user.avatar) : null
+                } : null,
+                city: post.city || null
+            }));
+            setLocalPosts(processedPosts);
         }
         setLocalLoading(loading.posts === undefined ? loading : false);
     }, [posts, loading]);

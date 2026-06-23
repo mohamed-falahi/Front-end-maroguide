@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { DataProvider, useData } from "./contexts/DataContext";
+import { ToastProvider } from "./contexts/ToastContext";
 import { NavBar } from "./components/NavBar";
 import { ExplorePage } from "./components/ExplorePage";
-import ProfilePage from './components/ProfilePage';
+import UserProfilePage from './components/UserProfilePage';
 import { CityPage } from "./components/CityPage";
 import { CategoryPage } from "./components/CategoryPage";
 import { PostModal } from "./components/PostModal";
@@ -11,6 +13,8 @@ import { AuthModal } from "./components/AuthModal";
 import { css } from "./styles/globalStyles";
 
 function AppContent() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [page, setPage] = useState("explore");
   const [cityFilter, setCityFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -19,9 +23,12 @@ function AppContent() {
   const { user } = useAuth();
   const { createPost } = useData();
 
+  // Check if we're on a user profile page
+  const isUserProfile = location.pathname.startsWith('/user/');
+
   const handleCityChange = (cityId) => {
     setCityFilter(cityId);
-    setCategoryFilter("all"); // Reset category when city changes
+    setCategoryFilter("all");
     if (cityId !== "all") {
       setPage("city");
     } else {
@@ -31,7 +38,7 @@ function AppContent() {
 
   const handleCategoryChange = (categoryId) => {
     setCategoryFilter(categoryId);
-    setCityFilter("all"); // Reset city when category changes
+    setCityFilter("all");
     if (categoryId !== "all") {
       setPage("category");
     } else {
@@ -39,9 +46,20 @@ function AppContent() {
     }
   };
 
+  const handleNavigateToUser = (userId) => {
+    navigate(`/user/${userId}`);
+  };
+
+  const handleProfileClick = () => {
+    if (user) {
+      navigate(`/user/${user.id}`);
+    }
+  };
+
   return (
     <div>
       <style>{css}</style>
+      {/* Only one NavBar - outside the page rendering */}
       <NavBar
         page={page}
         setPage={setPage}
@@ -50,18 +68,19 @@ function AppContent() {
         categoryFilter={categoryFilter}
         setCategoryFilter={handleCategoryChange}
         onAuthClick={() => setShowAuthModal(true)}
+        onProfileClick={handleProfileClick}
       />
 
-      {page === "explore" && (
+      {!isUserProfile && page === "explore" && (
         <ExplorePage
           cityFilter={cityFilter}
           categoryFilter={categoryFilter}
           onOpenModal={() => user ? setShowPostModal(true) : setShowAuthModal(true)}
+          onUserClick={handleNavigateToUser}
         />
       )}
-      {page === "profile" && <ProfilePage />}
-      {page === "city" && <CityPage cityId={cityFilter} />}
-      {page === "category" && (
+      {!isUserProfile && page === "city" && <CityPage cityId={cityFilter} />}
+      {!isUserProfile && page === "category" && (
         <CategoryPage
           categoryId={categoryFilter}
           onBack={() => {
@@ -70,6 +89,8 @@ function AppContent() {
           }}
         />
       )}
+
+      {isUserProfile && <UserProfilePage />}
 
       {showPostModal && (
         <PostModal
@@ -86,10 +107,17 @@ function AppContent() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <DataProvider>
-        <AppContent />
-      </DataProvider>
-    </AuthProvider>
+    <ToastProvider>
+      <AuthProvider>
+        <DataProvider>
+          <Router>
+            <Routes>
+              <Route path="/*" element={<AppContent />} />
+              <Route path="/user/:userId" element={<AppContent />} />
+            </Routes>
+          </Router>
+        </DataProvider>
+      </AuthProvider>
+    </ToastProvider>
   );
 }

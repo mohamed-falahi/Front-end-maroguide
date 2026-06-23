@@ -20,14 +20,13 @@ export function AuthProvider({ children }) {
         } else {
             setLoading(false);
         }
-    }, [token]);
+    }, []);                         // ← run once on mount only, not on every token change
 
     const fetchUser = async () => {
         try {
             const data = await api.authGet("/user", token);
             setUser(data.user || data);
-        } catch (error) {
-            console.error("Failed to fetch user:", error);
+        } catch {
             localStorage.removeItem("token");
             setToken(null);
         } finally {
@@ -35,44 +34,34 @@ export function AuthProvider({ children }) {
         }
     };
 
+    const saveSession = (data) => {
+        localStorage.setItem("token", data.token);
+        setToken(data.token);
+        setUser(data.user);
+    };
+
     const login = async (email, password) => {
         try {
             const data = await api.login({ email, password });
-            console.log("Login response:", data);
-
-            if (data.token) {
-                localStorage.setItem("token", data.token);
-                setToken(data.token);
-                setUser(data.user);
-                return { success: true };
-            }
-            return { success: false, error: data.message || "Login failed" };
+            saveSession(data);
+            return { success: true };
         } catch (error) {
-            return { success: false, error: "Network error" };
+            return { success: false, error: error.message };   // real error now
         }
     };
 
     const register = async (name, email, password, password_confirmation) => {
         try {
             const data = await api.register({ name, email, password, password_confirmation });
-            console.log("Register response:", data);
-
-            if (data.token) {
-                localStorage.setItem("token", data.token);
-                setToken(data.token);
-                setUser(data.user);
-                return { success: true };
-            }
-            return { success: false, error: data.message || "Registration failed" };
+            saveSession(data);
+            return { success: true };
         } catch (error) {
-            return { success: false, error: "Network error" };
+            return { success: false, error: error.message };   // real error now
         }
     };
 
     const logout = async () => {
-        if (token) {
-            await api.logout(token);
-        }
+        try { if (token) await api.logout(token); } catch { /* ignore */ }
         localStorage.removeItem("token");
         setToken(null);
         setUser(null);

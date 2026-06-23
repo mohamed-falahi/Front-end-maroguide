@@ -2,24 +2,23 @@ import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
+import { useParams, useNavigate } from "react-router-dom";
+import { api } from "../services/api";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 
-export function ProfilePage() {
-    const { user, token, setUser } = useAuth();
+export function UserProfilePage() {
+    const { userId } = useParams();
+    const navigate = useNavigate();
+    const { user: currentUser, token, setUser } = useAuth();
     const { showSuccess, showError, showWarning, showInfo } = useToast();
     const {
-        posts,
-        userPosts: contextUserPosts,
-        refreshUserPosts,
-        fetchUserStats,
         updateUserProfile,
         uploadAvatar,
         uploadCover,
         getCurrentUser
     } = useData();
-
-    const [activeTab, setActiveTab] = useState("posts");
+    const [profileUser, setProfileUser] = useState(null);
     const [userPosts, setUserPosts] = useState([]);
     const [stats, setStats] = useState({
         posts: 0,
@@ -27,7 +26,21 @@ export function ProfilePage() {
         following: 0,
     });
     const [loading, setLoading] = useState(true);
+    const [isFollowing, setIsFollowing] = useState(false);
+    const [followLoading, setFollowLoading] = useState(false);
+    const [activeTab, setActiveTab] = useState("posts");
     const [uploading, setUploading] = useState(false);
+    const [showEdit, setShowEdit] = useState(false);
+    const [draft, setDraft] = useState({
+        name: "",
+        bio: "",
+        avatar: null,
+        cover: null,
+    });
+    const [avatarFile, setAvatarFile] = useState(null);
+    const [coverFile, setCoverFile] = useState(null);
+    const [avatarPreview, setAvatarPreview] = useState(null);
+    const [coverPreview, setCoverPreview] = useState(null);
 
     const getImageUrl = (path) => {
         if (!path) return null;
@@ -40,131 +53,98 @@ export function ProfilePage() {
         return `${API_BASE_URL}/storage/${path}`;
     };
 
-    const [profile, setProfile] = useState({
-        name: user?.name || "",
-        bio: user?.bio || "Exploring the hidden gems of the Maghreb",
-        avatar: user?.avatar ? getImageUrl(user.avatar) : null,
-        cover: user?.cover_image ? getImageUrl(user.cover_image) : "https://images.unsplash.com/photo-1509316785289-025f5b846b35?w=1200&q=80",
-    });
-
-    const [showEdit, setShowEdit] = useState(false);
-    const [draft, setDraft] = useState({ ...profile });
-    const [avatarFile, setAvatarFile] = useState(null);
-    const [coverFile, setCoverFile] = useState(null);
-    const [avatarPreview, setAvatarPreview] = useState(null);
-    const [coverPreview, setCoverPreview] = useState(null);
-
-    // Fetch user posts - THIS IS THE KEY FUNCTION
-    const fetchUserPosts = useCallback(async () => {
-        if (!user?.id) {
-            console.log("No user ID, skipping fetch");
-            return [];
-        }
+    const fetchUserProfile = useCallback(async () => {
+        if (!userId) return;
         try {
             setLoading(true);
-            console.log("🔄 Fetching posts for user:", user.id);
-            const postsData = await refreshUserPosts(user.id);
-            console.log("📦 Posts data received:", postsData);
+            console.log("Fetching user profile for:", userId);
 
-            // Ensure we have an array
-            const postsArray = Array.isArray(postsData) ? postsData : [];
-            console.log("📊 Posts array length:", postsArray.length);
+            const userResponse = await api.get(`/users/${userId}`);
+            console.log("User profile response:", userResponse);
 
-            setUserPosts(postsArray);
+            if (userResponse && userResponse.success && userResponse.user) {
+                setProfileUser(userResponse.user);
+                setIsFollowing(userResponse.user.is_following || false);
 
-            // Update stats with the actual post count
-            setStats(prev => ({
-                ...prev,
-                posts: postsArray.length
-            }));
+                setStats({
+                    posts: userResponse.user.posts_count || 0,
+                    followers: userResponse.user.followers_count || 0,
+                    following: userResponse.user.following_count || 0,
+                });
+            }
 
-            return postsArray;
+            const postsResponse = await api.get(`/users/${userId}/posts`);
+            console.log("User posts response:", postsResponse);
+
+            let postsData = [];
+            if (postsResponse && postsResponse.success && postsResponse.posts) {
+                if (postsResponse.posts.data && Array.isArray(postsResponse.posts.data)) {
+                    postsData = postsResponse.posts.data;
+                } else if (Array.isArray(postsResponse.posts)) {
+                    postsData = postsResponse.posts;
+                }
+            }
+            setUserPosts(postsData);
+
         } catch (error) {
-            console.error("❌ Error fetching user posts:", error);
-            setUserPosts([]);
-            showError("Failed to load posts");
-            return [];
+            console.error("Error fetching user profile:", error);
+            showError("Failed to load user profile");
         } finally {
             setLoading(false);
         }
-    }, [user?.id, refreshUserPosts, showError]);
+    }, [userId, showError]);
 
-    // Fetch user stats
-    const fetchUserStatsData = useCallback(async () => {
-        if (!user?.id) return;
-        try {
-            console.log("📊 Fetching stats for user:", user.id);
-            const response = await fetchUserStats(user.id);
-            console.log("📊 Stats response:", response);
-            if (response) {
-                setStats(prev => ({
-                    posts: prev.posts || userPosts.length || 0,
-                    followers: response.followers_count || 0,
-                    following: response.following_count || 0,
-                }));
-            }
-        } catch (error) {
-            console.error("❌ Error fetching user stats:", error);
-        }
-    }, [user?.id, fetchUserStats, userPosts.length]);
+    useEffect(() => {
+        fetchUserProfile();
+    }, [fetchUserProfile]);
 
-    // Main load function
-    const loadUserData = useCallback(async () => {
-        if (!user?.id) {
-            console.log("❌ No user ID, skipping load");
+    const handleFollow = async () => {
+        if (!currentUser) {
+            showWarning("Please login to follow users");
             return;
         }
-        console.log("🔄 Loading user data for:", user.id);
-        const postsData = await fetchUserPosts();
-        console.log("📊 Posts loaded:", postsData?.length || 0);
-        await fetchUserStatsData();
-    }, [fetchUserPosts, fetchUserStatsData, user?.id]);
 
-    // Update profile when user changes
-    useEffect(() => {
-        if (user) {
-            console.log("👤 User changed:", user.id);
-            setProfile({
-                name: user.name || "",
-                bio: user.bio || "Exploring the hidden gems of the Maghreb",
-                avatar: user.avatar ? getImageUrl(user.avatar) : null,
-                cover: user.cover_image ? getImageUrl(user.cover_image) : "https://images.unsplash.com/photo-1509316785289-025f5b846b35?w=1200&q=80",
-            });
+        if (!profileUser) return;
+        setFollowLoading(true);
 
-            loadUserData();
+        try {
+            const response = await api.authPost(`/users/${profileUser.id}/follow`, {}, token);
+            console.log("Follow response:", response);
+
+            if (response && response.success) {
+                setIsFollowing(!isFollowing);
+                setStats(prev => ({
+                    ...prev,
+                    followers: isFollowing ? prev.followers - 1 : prev.followers + 1
+                }));
+                showSuccess(isFollowing ? "Unfollowed successfully" : "Followed successfully");
+            } else {
+                showError(response?.message || "Failed to follow user");
+            }
+        } catch (error) {
+            console.error("Error following user:", error);
+            showError("An error occurred");
+        } finally {
+            setFollowLoading(false);
         }
-    }, [user]); // Only depend on user
+    };
 
-    // Update userPosts when context userPosts changes
-    useEffect(() => {
-        if (contextUserPosts && Array.isArray(contextUserPosts)) {
-            console.log("🔄 Context user posts updated:", contextUserPosts.length);
-            setUserPosts(contextUserPosts);
-            setStats(prev => ({
-                ...prev,
-                posts: contextUserPosts.length
-            }));
+    const handleMessage = () => {
+        if (!currentUser) {
+            showWarning("Please login to send messages");
+            return;
         }
-    }, [contextUserPosts]);
-
-    // Also update stats when userPosts changes
-    useEffect(() => {
-        if (userPosts.length > 0) {
-            setStats(prev => ({
-                ...prev,
-                posts: userPosts.length
-            }));
-        }
-    }, [userPosts]);
-
-    // Log userPosts for debugging
-    useEffect(() => {
-        console.log("📊 Current userPosts:", userPosts);
-        console.log("📊 UserPosts length:", userPosts.length);
-    }, [userPosts]);
+        navigate(`/messages/${profileUser.id}`);
+    };
 
     const openEdit = () => {
-        setDraft({ ...profile });
+        if (!profileUser) return;
+        setDraft({
+            name: profileUser.name || "",
+            bio: profileUser.bio || "",
+            avatar: profileUser.avatar ? getImageUrl(profileUser.avatar) : null,
+            cover: profileUser.cover_image ? getImageUrl(profileUser.cover_image) : null,
+        });
         setAvatarFile(null);
         setCoverFile(null);
         setAvatarPreview(null);
@@ -226,11 +206,11 @@ export function ProfilePage() {
                         setUser(updatedUser);
                     }
 
-                    setProfile({
-                        name: updatedUser.name || draft.name,
-                        bio: updatedUser.bio || draft.bio || "Exploring the hidden gems of the Maghreb",
-                        avatar: updatedUser.avatar ? getImageUrl(updatedUser.avatar) : null,
-                        cover: updatedUser.cover_image ? getImageUrl(updatedUser.cover_image) : "https://images.unsplash.com/photo-1509316785289-025f5b846b35?w=1200&q=80",
+                    setProfileUser(updatedUser);
+                    setStats({
+                        posts: updatedUser.posts_count || 0,
+                        followers: updatedUser.followers_count || 0,
+                        following: updatedUser.following_count || 0,
                     });
 
                     setShowEdit(false);
@@ -246,37 +226,24 @@ export function ProfilePage() {
                     showSuccess(successMessage);
                 } else {
                     const updatedUserData = {
-                        ...user,
+                        ...profileUser,
                         name: draft.name,
                         bio: draft.bio,
                     };
 
                     if (avatarUploaded && avatarPath) {
-                        updatedUserData.avatar = getImageUrl(avatarPath);
+                        updatedUserData.avatar = avatarPath;
                     } else if (avatarUploaded && avatarFile) {
-                        updatedUserData.avatar = URL.createObjectURL(avatarFile);
+                        updatedUserData.avatar = avatarFile;
                     }
 
                     if (coverUploaded && coverPath) {
-                        updatedUserData.cover_image = getImageUrl(coverPath);
+                        updatedUserData.cover_image = coverPath;
                     } else if (coverUploaded && coverFile) {
-                        updatedUserData.cover_image = URL.createObjectURL(coverFile);
+                        updatedUserData.cover_image = coverFile;
                     }
 
-                    if (setUser) {
-                        setUser(updatedUserData);
-                    }
-
-                    setProfile({
-                        name: draft.name,
-                        bio: draft.bio || "Exploring the hidden gems of the Maghreb",
-                        avatar: avatarUploaded && avatarPath ? getImageUrl(avatarPath) :
-                            avatarUploaded && avatarFile ? URL.createObjectURL(avatarFile) :
-                                profile.avatar,
-                        cover: coverUploaded && coverPath ? getImageUrl(coverPath) :
-                            coverUploaded && coverFile ? URL.createObjectURL(coverFile) :
-                                profile.cover,
-                    });
+                    setProfileUser(updatedUserData);
 
                     setShowEdit(false);
 
@@ -327,7 +294,6 @@ export function ProfilePage() {
         { id: "saved", label: "Saved", icon: "♥" },
     ];
 
-    // Use actual user posts
     const GRID_POSTS = userPosts.length > 0
         ? userPosts.map(post => ({
             img: post.media && post.media.length > 0
@@ -337,20 +303,6 @@ export function ProfilePage() {
             caption: post.content?.substring(0, 60) || "Travel memories",
         }))
         : [];
-
-    const RECENT = userPosts.length > 0
-        ? userPosts.slice(0, 3).map(post => ({
-            name: post.city?.name || "Morocco",
-            sub: post.content?.substring(0, 30) || "Travel memories",
-            img: post.media && post.media.length > 0
-                ? getImageUrl(post.media[0])
-                : "https://images.unsplash.com/photo-1548019979-2f0f98b6f42e?w=100",
-        }))
-        : [
-            { name: "Chefchaouen", sub: "The Blue Pearl", img: "https://images.unsplash.com/photo-1548019979-2f0f98b6f42e?w=100" },
-            { name: "Marrakech", sub: "The Red City", img: "https://images.unsplash.com/photo-1597212618440-806262de5d7b?w=100" },
-            { name: "Fès", sub: "The Imperial Soul", img: "https://images.unsplash.com/photo-1539020140153-e479b8c22e70?w=100" },
-        ];
 
     const renderTabContent = () => {
         switch (activeTab) {
@@ -370,7 +322,7 @@ export function ProfilePage() {
                 ) : (
                     <div style={{ textAlign: "center", padding: "40px", color: "var(--text-muted)" }}>
                         <p style={{ fontSize: "40px", marginBottom: "10px" }}>📸</p>
-                        <p>No posts yet. Share your first Moroccan adventure!</p>
+                        <p>No posts yet.</p>
                     </div>
                 );
             case "routes":
@@ -455,9 +407,11 @@ export function ProfilePage() {
         return <div style={{ textAlign: "center", padding: "60px" }}>Loading profile...</div>;
     }
 
-    if (!user) {
-        return <div style={{ textAlign: "center", padding: "60px" }}><h2>Please login to view your profile</h2></div>;
+    if (!profileUser) {
+        return <div style={{ textAlign: "center", padding: "60px" }}><h2>User not found</h2></div>;
     }
+
+    const isOwnProfile = currentUser?.id === profileUser.id;
 
     return (
         <>
@@ -546,7 +500,7 @@ export function ProfilePage() {
           margin-left: auto;
           margin-right: auto;
         }
-        .profile-follow-btn, .profile-update-btn {
+        .profile-follow-btn, .profile-message-btn, .profile-edit-btn {
           flex: 1;
           padding: 9px 0;
           border-radius: 8px;
@@ -554,15 +508,35 @@ export function ProfilePage() {
           font-weight: 500;
           cursor: pointer;
           border: none;
+          transition: all 0.2s;
         }
         .profile-follow-btn {
-          background: #dc2626;
-          color: #fff;
+          background: ${isFollowing ? '#e5e7eb' : '#dc2626'};
+          color: ${isFollowing ? '#1a1917' : '#fff'};
         }
-        .profile-update-btn {
+        .profile-follow-btn:hover {
+          opacity: 0.9;
+        }
+        .profile-follow-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+        .profile-message-btn {
           background: white;
           color: #1a1917;
           border: 0.5px solid rgba(0,0,0,0.1);
+        }
+        .profile-message-btn:hover {
+          background: #f3f4f6;
+        }
+        .profile-edit-btn {
+          background: white;
+          color: #1a1917;
+          border: 0.5px solid rgba(0,0,0,0.1);
+          flex: 1;
+        }
+        .profile-edit-btn:hover {
+          background: #f3f4f6;
         }
         .posts-tabs {
           display: flex;
@@ -861,19 +835,42 @@ export function ProfilePage() {
           background: #dc2626;
           color: #fff;
         }
+        .back-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          background: none;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 8px 0;
+          font-size: 14px;
+          font-weight: 500;
+        }
+        .back-btn:hover {
+          color: var(--text);
+        }
       `}</style>
 
             <div className="profile-cover-wrapper">
-                <img src={profile.cover} alt="cover" className="profile-cover-img" />
+                <img
+                    src={profileUser.cover_image ? getImageUrl(profileUser.cover_image) : "https://images.unsplash.com/photo-1509316785289-025f5b846b35?w=1200&q=80"}
+                    alt="cover"
+                    className="profile-cover-img"
+                />
                 <div className="profile-cover-gradient" />
             </div>
 
             <div className="profile-body">
+                <button className="back-btn" onClick={() => navigate(-1)}>
+                    ← Back
+                </button>
+
                 <div className="profile-avatar-row">
                     <div className="profile-avatar-circle">
-                        {profile.avatar ? (
+                        {profileUser.avatar ? (
                             <img
-                                src={profile.avatar}
+                                src={getImageUrl(profileUser.avatar)}
                                 alt="avatar"
                                 style={{
                                     width: "100%",
@@ -888,8 +885,8 @@ export function ProfilePage() {
                     </div>
                 </div>
 
-                <div className="profile-name">{profile.name}</div>
-                <div className="profile-bio">{profile.bio}</div>
+                <div className="profile-name">{profileUser.name}</div>
+                <div className="profile-bio">{profileUser.bio || "Exploring the hidden gems of the Maghreb"}</div>
 
                 <div className="profile-stats">
                     <div className="stat-item">
@@ -907,10 +904,24 @@ export function ProfilePage() {
                 </div>
 
                 <div className="profile-btns">
-                    <button className="profile-follow-btn">Message</button>
-                    <button className="profile-update-btn" onClick={openEdit}>
-                        ✏️ Update
-                    </button>
+                    {!isOwnProfile ? (
+                        <>
+                            <button
+                                className="profile-follow-btn"
+                                onClick={handleFollow}
+                                disabled={followLoading}
+                            >
+                                {followLoading ? "..." : isFollowing ? "Following" : "Follow"}
+                            </button>
+                            <button className="profile-message-btn" onClick={handleMessage}>
+                                💬 Message
+                            </button>
+                        </>
+                    ) : (
+                        <button className="profile-edit-btn" onClick={openEdit}>
+                            ✏️ Edit Profile
+                        </button>
+                    )}
                 </div>
 
                 <div className="posts-tabs">
@@ -938,12 +949,16 @@ export function ProfilePage() {
                                 Recently Visited
                             </span>
                         </div>
-                        {RECENT.map((city, index) => (
+                        {userPosts.slice(0, 3).map((post, index) => (
                             <div key={index} className="recently-item">
-                                <img src={city.img} alt={city.name} className="recently-thumb" />
+                                <img
+                                    src={post.media && post.media.length > 0 ? getImageUrl(post.media[0]) : "https://images.unsplash.com/photo-1548019979-2f0f98b6f42e?w=100"}
+                                    alt={post.city?.name || "Morocco"}
+                                    className="recently-thumb"
+                                />
                                 <div>
-                                    <div className="recently-name">{city.name}</div>
-                                    <div className="recently-sub">{city.sub}</div>
+                                    <div className="recently-name">{post.city?.name || "Morocco"}</div>
+                                    <div className="recently-sub">{post.content?.substring(0, 30) || "Travel memories"}</div>
                                 </div>
                             </div>
                         ))}
@@ -951,6 +966,7 @@ export function ProfilePage() {
                 </div>
             </div>
 
+            {/* Edit Modal */}
             {showEdit && (
                 <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && closeEdit()}>
                     <div className="modal edit-profile-modal">
@@ -1009,4 +1025,4 @@ export function ProfilePage() {
     );
 }
 
-export default ProfilePage;
+export default UserProfilePage;
