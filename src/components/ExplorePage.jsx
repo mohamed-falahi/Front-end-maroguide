@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
 import { useData } from "../contexts/DataContext";
 import { useAuth } from "../contexts/AuthContext";
+import { useToast } from "../contexts/ToastContext";
 import { CreatePostCard } from "./CreatePostCard";
 import { PostCard } from "./PostCard";
 import { Sidebar } from "./Sidebar";
 import { api } from "../services/api";
 
-// Add API base URL and helper function
 const API_BASE_URL = "http://127.0.0.1:8000";
 
 const getImageUrl = (path) => {
@@ -20,9 +20,10 @@ const getImageUrl = (path) => {
     return `${API_BASE_URL}/storage/${path}`;
 };
 
-export function ExplorePage({ cityFilter, onOpenModal }) {
-    const { posts, loading, likePost, deletePost } = useData();
+export function ExplorePage({ cityFilter, onOpenModal, onUserClick }) {
+    const { posts, loading, likePost, deletePost, createPost } = useData();
     const { user, token } = useAuth();
+    const { showSuccess, showError, showWarning } = useToast();
     const [localPosts, setLocalPosts] = useState([]);
     const [localLoading, setLocalLoading] = useState(true);
 
@@ -45,7 +46,7 @@ export function ExplorePage({ cityFilter, onOpenModal }) {
     // Handle comment submission
     const handleComment = async (postId, commentText) => {
         if (!token) {
-            alert("Please login to comment");
+            showWarning("Please login to comment");
             return { success: false };
         }
 
@@ -54,7 +55,6 @@ export function ExplorePage({ cityFilter, onOpenModal }) {
                 content: commentText
             }, token);
 
-            // Update the post's comment count in local state
             setLocalPosts(prevPosts =>
                 prevPosts.map(post =>
                     post.id === postId
@@ -63,9 +63,11 @@ export function ExplorePage({ cityFilter, onOpenModal }) {
                 )
             );
 
+            showSuccess("Comment added!");
             return { success: true, data: response.data || response.comment };
         } catch (error) {
             console.error("Error posting comment:", error);
+            showError("Failed to add comment");
             return { success: false };
         }
     };
@@ -73,14 +75,13 @@ export function ExplorePage({ cityFilter, onOpenModal }) {
     // Handle like
     const handleLike = async (postId) => {
         if (!token) {
-            alert("Please login to like posts");
+            showWarning("Please login to like posts");
             return { success: false };
         }
 
         try {
             const result = await likePost(postId);
 
-            // Update local state to reflect like
             setLocalPosts(prevPosts =>
                 prevPosts.map(post =>
                     post.id === postId
@@ -97,46 +98,107 @@ export function ExplorePage({ cityFilter, onOpenModal }) {
             return result;
         } catch (error) {
             console.error("Error liking post:", error);
+            showError("Failed to like post");
             return { success: false };
         }
     };
 
-    // Handle delete
+    // Handle delete - Just call the delete function, PostCard handles the modal
     const handleDelete = async (postId) => {
-        if (!user) {
-            alert("Please login to delete posts");
-            return;
+        try {
+            await deletePost(postId);
+            setLocalPosts(prevPosts => prevPosts.filter(p => p.id !== postId));
+            showSuccess("Post deleted!");
+        } catch (error) {
+            console.error("Error deleting post:", error);
+            showError("Failed to delete post");
         }
+    };
 
-        if (window.confirm("Are you sure you want to delete this post?")) {
-            try {
-                await deletePost(postId);
-                setLocalPosts(prevPosts => prevPosts.filter(p => p.id !== postId));
-            } catch (error) {
-                console.error("Error deleting post:", error);
-                alert("Failed to delete post");
+    // Handle creating a new post
+    const handleCreatePost = async (postData) => {
+        try {
+            const result = await createPost(postData);
+            if (result && result.success && result.post) {
+                showSuccess("Post created successfully!");
+
+                const newPost = {
+                    ...result.post,
+                    user: {
+                        id: user.id,
+                        name: user.name,
+                        avatar: user.avatar || null,
+                        profile_image: user.profile_image || null,
+                    },
+                    user_id: user.id,
+                    city: result.post.city || { name: 'Unknown Location' },
+                    media: result.post.media || [],
+                    likes_count: 0,
+                    comments_count: 0,
+                    is_liked: false,
+                    created_at: new Date().toISOString(),
+                };
+
+                setLocalPosts(prev => [newPost, ...prev]);
+                return result;
+            } else {
+                showError(result?.message || "Failed to create post");
+                return result;
             }
+        } catch (error) {
+            console.error("Error creating post:", error);
+            showError("Failed to create post");
+            return { success: false };
         }
     };
 
     // Update local posts when context posts change
     useEffect(() => {
         if (posts && posts.length > 0) {
-            // Process posts to ensure media URLs are correct
-            const processedPosts = posts.map(post => ({
-                ...post,
-                media: post.media && post.media.length > 0
-                    ? post.media.map(m => getImageUrl(m))
-                    : [],
-                // If media is stored as JSON string, parse it
-                media_raw: post.media_raw || post.media,
-                user: post.user ? {
-                    ...post.user,
-                    avatar: post.user.avatar ? getImageUrl(post.user.avatar) : null
-                } : null,
-                city: post.city || null
-            }));
+            const processedPosts = posts.map(post => {
+                let userData = post.user || post.author || {};
+                if (typeof userData === 'number' || typeof userData === 'string') {
+                    userData = { id: userData, name: 'User ' + userData };
+                }
+                if (!userData.name) {
+                    userData.name = 'Anonymous User';
+                }
+
+                let mediaUrls = [];
+                if (post.media && post.media.length > 0) {
+                    mediaUrls = post.media.map(m => {
+                        if (typeof m === 'string') return getImageUrl(m);
+                        if (m.path) return getImageUrl(m.path);
+                        if (m.url) return getImageUrl(m.url);
+                        return null;
+                    }).filter(Boolean);
+                }
+
+                if (post.image && !mediaUrls.length) {
+                    mediaUrls = [getImageUrl(post.image)];
+                }
+                if (post.image_url && !mediaUrls.length) {
+                    mediaUrls = [getImageUrl(post.image_url)];
+                }
+
+                return {
+                    ...post,
+                    user: {
+                        ...userData,
+                        avatar: userData.avatar ? getImageUrl(userData.avatar) : null,
+                        profile_image: userData.profile_image ? getImageUrl(userData.profile_image) : null,
+                    },
+                    media: mediaUrls,
+                    media_raw: post.media || post.images || [],
+                    city: post.city || { name: 'Unknown Location' },
+                    likes_count: post.likes_count || post.likes || 0,
+                    comments_count: post.comments_count || post.comments || 0,
+                    is_liked: post.is_liked || post.liked || false,
+                };
+            });
             setLocalPosts(processedPosts);
+        } else {
+            setLocalPosts([]);
         }
         setLocalLoading(loading.posts === undefined ? loading : false);
     }, [posts, loading]);
@@ -159,7 +221,7 @@ export function ExplorePage({ cityFilter, onOpenModal }) {
                         📍 Showing posts from {cityName}
                     </div>
                 )}
-                {user && <CreatePostCard onOpenModal={onOpenModal} />}
+                {user && <CreatePostCard onOpenModal={() => onOpenModal(handleCreatePost)} />}
                 {filteredPosts.length === 0 ? (
                     <div style={{ textAlign: "center", padding: "40px", color: "var(--text-muted)" }}>
                         No posts found. Be the first to share! 📸
@@ -181,3 +243,5 @@ export function ExplorePage({ cityFilter, onOpenModal }) {
         </div>
     );
 }
+
+export default ExplorePage;

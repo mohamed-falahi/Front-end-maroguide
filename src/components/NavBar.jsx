@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useData } from "../contexts/DataContext";
 import { MOCK_CITIES } from "../constants/mockData";
+import { useLocation, useNavigate } from "react-router-dom";
 
 export function NavBar({
     page,
@@ -11,16 +12,24 @@ export function NavBar({
     categoryFilter,
     setCategoryFilter,
     onAuthClick,
-    onProfileClick // Add this new prop
+    onProfileClick,
+    onExploreClick,
+    onAdminClick
 }) {
     const { user, logout } = useAuth();
     const { cities, categories } = useData();
+    const location = useLocation();
+    const navigate = useNavigate();
     const [cityOpen, setCityOpen] = useState(false);
     const [categoryOpen, setCategoryOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
 
     const cityList = [{ id: "all", name: "All Cities" }, ...(cities.length ? cities : MOCK_CITIES)];
     const categoryList = [{ id: "all", name: "All Categories" }, ...(categories.length ? categories : [])];
+
+    // Check if we're on a user profile page
+    const isUserProfile = location.pathname.startsWith('/user/');
+    const isProfilePage = page === "profile" || isUserProfile;
 
     const handleCitySelect = (cityId) => {
         setCityFilter(cityId);
@@ -46,18 +55,35 @@ export function NavBar({
         if (onProfileClick) {
             onProfileClick();
         } else if (user) {
-            // Fallback: if onProfileClick is not provided, navigate to profile page
             setPage("profile");
         }
     };
 
+    const handleExploreClick = () => {
+        if (onExploreClick) {
+            onExploreClick();
+        } else {
+            setPage("explore");
+            setCityFilter("all");
+            setCategoryFilter("all");
+        }
+    };
+
+    const handleAdminClick = () => {
+        if (onAdminClick) {
+            onAdminClick();
+        } else {
+            setPage("admin");
+        }
+    };
+
+    const handleMessagesClick = () => {
+        navigate('/messages');
+    };
+
     return (
         <nav className="navbar">
-            <div className="logo-section" onClick={() => {
-                setPage("explore");
-                setCityFilter("all");
-                setCategoryFilter("all");
-            }}>
+            <div className="logo-section" onClick={handleExploreClick}>
                 <img src="/image/logo.png" alt="Maroguide" className="logo-image" />
             </div>
 
@@ -78,21 +104,27 @@ export function NavBar({
             <div className="nav-links">
                 <button
                     className={`nav-link ${page === "explore" ? "active" : ""}`}
-                    onClick={() => {
-                        setPage("explore");
-                        setCityFilter("all");
-                        setCategoryFilter("all");
-                    }}
+                    onClick={handleExploreClick}
                 >
                     Explore
                 </button>
 
                 {user && (
                     <button
-                        className={`nav-link ${page === "profile" ? "active" : ""}`}
+                        className={`nav-link ${isProfilePage ? "active" : ""}`}
                         onClick={handleProfileClick}
                     >
                         Profile
+                    </button>
+                )}
+
+                {/* Admin Link - Only visible to admin users */}
+                {user?.role === 'admin' && (
+                    <button
+                        className={`nav-link ${page === "admin" ? "active" : ""}`}
+                        onClick={handleAdminClick}
+                    >
+                        Admin
                     </button>
                 )}
 
@@ -176,8 +208,21 @@ export function NavBar({
             <div className="user-section">
                 {user ? (
                     <>
+                        {/* Messages Button */}
+                        <button
+                            className="icon-button messages-btn"
+                            onClick={handleMessagesClick}
+                            aria-label="Messages"
+                            title="Messages"
+                        >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                        </button>
+
                         <span className="user-name">{user.name}</span>
-                        <button className="icon-button" onClick={logout} aria-label="Logout">
+
+                        <button className="icon-button" onClick={logout} aria-label="Logout" title="Logout">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
                                 <polyline points="16 17 21 12 16 7"></polyline>
@@ -186,11 +231,8 @@ export function NavBar({
                         </button>
                     </>
                 ) : (
-                    <button className="icon-button" onClick={onAuthClick} aria-label="Login">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                            <circle cx="12" cy="7" r="4"></circle>
-                        </svg>
+                    <button className="login-btn" onClick={onAuthClick}>
+                        Sign In
                     </button>
                 )}
             </div>
@@ -207,6 +249,7 @@ export function NavBar({
                     position: sticky;
                     top: 0;
                     z-index: 1000;
+                    gap: 16px;
                 }
 
                 .logo-section {
@@ -214,6 +257,7 @@ export function NavBar({
                     align-items: center;
                     gap: 10px;
                     cursor: pointer;
+                    flex-shrink: 0;
                 }
 
                 .logo-image {
@@ -221,18 +265,10 @@ export function NavBar({
                     width: auto;
                 }
 
-                .logo-text {
-                    font-size: 18px;
-                    font-weight: 600;
-                    color: #1a1a1a;
-                    letter-spacing: -0.3px;
-                }
-
                 .search-container {
                     flex: 1;
                     max-width: 400px;
                     position: relative;
-                    margin: 0 24px;
                 }
 
                 .search-icon {
@@ -252,6 +288,7 @@ export function NavBar({
                     font-family: 'DM Sans', sans-serif;
                     background: #fafafa;
                     transition: all 0.2s ease;
+                    color: #1a1a1a;
                 }
 
                 .search-input:focus {
@@ -261,10 +298,14 @@ export function NavBar({
                     box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.1);
                 }
 
+                .search-input::placeholder {
+                    color: #8c8c8c;
+                }
+
                 .nav-links {
                     display: flex;
                     align-items: center;
-                    gap: 8px;
+                    gap: 4px;
                 }
 
                 .nav-link {
@@ -278,6 +319,7 @@ export function NavBar({
                     cursor: pointer;
                     transition: all 0.2s ease;
                     font-family: 'DM Sans', sans-serif;
+                    white-space: nowrap;
                 }
 
                 .nav-link:hover {
@@ -297,7 +339,7 @@ export function NavBar({
                 .dropdown-btn {
                     display: flex;
                     align-items: center;
-                    gap: 8px;
+                    gap: 6px;
                     padding: 8px 12px;
                     font-size: 14px;
                     font-weight: 500;
@@ -308,6 +350,7 @@ export function NavBar({
                     cursor: pointer;
                     transition: all 0.2s ease;
                     font-family: 'DM Sans', sans-serif;
+                    white-space: nowrap;
                 }
 
                 .dropdown-btn:hover {
@@ -341,7 +384,13 @@ export function NavBar({
                     border-radius: 12px;
                     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
                     overflow: hidden;
-                    z-index: 100;
+                    z-index: 200;
+                    animation: dropDown 0.15s ease;
+                }
+
+                @keyframes dropDown {
+                    from { opacity: 0; transform: translateY(-6px); }
+                    to { opacity: 1; transform: translateY(0); }
                 }
 
                 .dropdown-item {
@@ -370,16 +419,39 @@ export function NavBar({
                     font-weight: 500;
                 }
 
+                /* User Section */
                 .user-section {
                     display: flex;
                     align-items: center;
-                    gap: 12px;
+                    gap: 8px;
+                    flex-shrink: 0;
+                }
+
+                .messages-btn {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 38px;
+                    height: 38px;
+                    background: transparent;
+                    border: none;
+                    border-radius: 10px;
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                    color: #4a4a4a;
+                    position: relative;
+                }
+
+                .messages-btn:hover {
+                    background: #f5f5f5;
+                    color: #b8860b;
                 }
 
                 .user-name {
                     font-size: 14px;
                     font-weight: 500;
                     color: #1a1a1a;
+                    margin: 0 4px;
                 }
 
                 .icon-button {
@@ -388,7 +460,7 @@ export function NavBar({
                     justify-content: center;
                     width: 36px;
                     height: 36px;
-                    background: #fafafa;
+                    background: transparent;
                     border: none;
                     border-radius: 10px;
                     cursor: pointer;
@@ -397,8 +469,25 @@ export function NavBar({
                 }
 
                 .icon-button:hover {
-                    background: #f0f0f0;
+                    background: #f5f5f5;
                     color: #b8860b;
+                }
+
+                .login-btn {
+                    padding: 8px 20px;
+                    background: #b8860b;
+                    color: white;
+                    border: none;
+                    border-radius: 10px;
+                    font-size: 14px;
+                    font-weight: 500;
+                    cursor: pointer;
+                    font-family: 'DM Sans', sans-serif;
+                    transition: background 0.2s;
+                }
+
+                .login-btn:hover {
+                    background: #a0750a;
                 }
 
                 @media (max-width: 1024px) {
@@ -407,12 +496,16 @@ export function NavBar({
                     }
                     
                     .search-container {
-                        max-width: 300px;
+                        max-width: 260px;
                     }
                     
                     .nav-link, .dropdown-btn {
-                        padding: 6px 12px;
+                        padding: 6px 10px;
                         font-size: 13px;
+                    }
+
+                    .user-name {
+                        display: none;
                     }
                 }
 
@@ -421,7 +514,20 @@ export function NavBar({
                         display: none;
                     }
                     
-                    .logo-text {
+                    .nav-links {
+                        gap: 2px;
+                    }
+
+                    .nav-link, .dropdown-btn {
+                        padding: 6px 8px;
+                        font-size: 12px;
+                    }
+
+                    .dropdown-btn span:not(.dropdown-icon) {
+                        display: none;
+                    }
+
+                    .user-name {
                         display: none;
                     }
                 }

@@ -794,6 +794,37 @@ body {
   transition: opacity 0.15s, transform 0.1s;
 }
 
+:root {
+  --primary: #dc2626;
+  --primary-dark: #b91c1c;
+  --text: #1a1917;
+  --text-muted: #6b6a67;
+  --bg: #f8f7f4;
+  --sand: #f1f0ed;
+  --border: #eaeaea;
+  --surface: #ffffff;
+}
+
+.page-layout {
+  display: flex;
+  gap: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 32px;
+}
+
+.main-col {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .page-layout {
+    flex-direction: column;
+    padding: 16px;
+  }
+}
+
 .cancel-btn {
   background: var(--sand);
   color: var(--text-muted);

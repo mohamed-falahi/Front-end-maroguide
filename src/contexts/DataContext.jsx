@@ -2,6 +2,19 @@ import { useState, useEffect, createContext, useContext, useCallback } from "rea
 import { api } from "../services/api";
 import { useAuth } from "./AuthContext";
 
+const API_BASE_URL = "http://127.0.0.1:8000";
+
+const getImageUrl = (path) => {
+    if (!path) return null;
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+        return path;
+    }
+    if (path.startsWith('/storage/')) {
+        return `${API_BASE_URL}${path}`;
+    }
+    return `${API_BASE_URL}/storage/${path}`;
+};
+
 const DataContext = createContext(null);
 
 export function useData() {
@@ -50,7 +63,6 @@ export function DataProvider({ children }) {
         }
     }, []);
 
-    // IMPORTANT: Fix this function to properly fetch user posts
     const fetchUserPosts = useCallback(async (userId) => {
         if (!userId) {
             console.log("No userId provided to fetchUserPosts");
@@ -64,21 +76,16 @@ export function DataProvider({ children }) {
 
             let postsData = [];
 
-            // Your backend returns: { success: true, posts: { data: [...] } }
-            // The posts are inside posts.data because of pagination
             if (data && data.success && data.posts) {
-                // If posts is paginated with Laravel's pagination
                 if (data.posts && data.posts.data && Array.isArray(data.posts.data)) {
                     postsData = data.posts.data;
                     console.log("✅ Found posts in posts.data:", postsData.length);
                 }
-                // If posts is an array directly
                 else if (Array.isArray(data.posts)) {
                     postsData = data.posts;
                     console.log("✅ Found posts directly in posts:", postsData.length);
                 }
             }
-            // Fallback: try to find any array in the response
             else if (data && typeof data === 'object') {
                 for (const key in data) {
                     if (Array.isArray(data[key])) {
@@ -107,7 +114,6 @@ export function DataProvider({ children }) {
             const data = await api.get(`/users/${userId}/profile`);
             console.log("📊 Stats response:", data);
 
-            // Your backend returns: { success: true, user: { ... } }
             if (data && data.success && data.user) {
                 const userData = data.user;
                 return {
@@ -156,48 +162,98 @@ export function DataProvider({ children }) {
         }
     }, [user, fetchUserPosts]);
 
+    // FIXED: createPost function with better image handling
     const createPost = async (postData) => {
-        const formData = new FormData();
-        formData.append("city_id", postData.city_id);
-        formData.append("category_id", postData.category_id);
-        formData.append("content", postData.content);
-        if (postData.media) {
-            postData.media.forEach(file => formData.append("media[]", file));
-        }
-
         try {
-            console.log("Creating post with data:", postData);
-            const data = await api.authPostFormData("/posts", formData, token);
-            console.log("Create post response:", data);
+            console.log("📝 Creating post with data:", postData);
 
-            const newPost = data?.data ?? data?.post ?? data;
-            if (newPost?.id) {
-                // Add to all posts
-                setPosts(prev => {
-                    const prevArray = Array.isArray(prev) ? prev : [];
-                    return [newPost, ...prevArray];
-                });
+            const formData = new FormData();
 
-                // Add to user posts if it belongs to current user
-                if (newPost.user_id === user?.id || newPost.user?.id === user?.id) {
-                    setUserPosts(prev => {
-                        const prevArray = Array.isArray(prev) ? prev : [];
-                        return [newPost, ...prevArray];
-                    });
-                    console.log("Added post to userPosts");
+            // Handle if postData is FormData or object
+            if (postData instanceof FormData) {
+                // If it's already FormData, copy all entries
+                for (let [key, value] of postData.entries()) {
+                    formData.append(key, value);
                 }
-
-                return { success: true, data: newPost };
             } else {
-                await fetchPosts();
-                if (user?.id) {
-                    await fetchUserPosts(user.id);
+                // Append all fields from object
+                formData.append('content', postData.content || '');
+                formData.append('city_id', postData.city_id || '');
+                formData.append('category_id', postData.category_id || '');
+
+                // Handle images - make sure they are properly appended
+                if (postData.images && postData.images.length > 0) {
+                    postData.images.forEach((image, index) => {
+                        // Use 'images[]' format for multiple files
+                        formData.append('images[]', image);
+                    });
                 }
-                return { success: true };
+            }
+
+            // Log the form data entries for debugging
+            console.log("📤 FormData entries:");
+            let hasFiles = false;
+            for (let [key, value] of formData.entries()) {
+                if (value instanceof File) {
+                    hasFiles = true;
+                    console.log(`  ${key}: File: ${value.name} (${value.size} bytes, type: ${value.type})`);
+                } else {
+                    console.log(`  ${key}: ${value}`);
+                }
+            }
+            console.log("📸 Has files:", hasFiles);
+
+            // Make the API call using authPostFormData
+            const response = await api.authPostFormData('/posts', formData, token);
+            console.log("✅ Create post response:", response);
+
+            if (response) {
+                let newPost = null;
+
+                if (response.success && response.post) {
+                    newPost = response.post;
+                } else if (response.success && response.data) {
+                    newPost = response.data;
+                } else if (response.id) {
+                    newPost = response;
+                } else if (response.data && response.data.id) {
+                    newPost = response.data;
+                }
+
+                if (newPost && newPost.id) {
+                    console.log("✅ Post created successfully:", newPost);
+
+                    // Process media URLs for the new post
+                    if (newPost.media && newPost.media.length > 0) {
+                        newPost.media = newPost.media.map(m => {
+                            if (typeof m === 'string') return getImageUrl(m);
+                            if (m.path) return getImageUrl(m.path);
+                            if (m.url) return getImageUrl(m.url);
+                            return m;
+                        });
+                    }
+
+                    // Add the new post to local state
+                    setPosts(prev => [newPost, ...(Array.isArray(prev) ? prev : [])]);
+                    setUserPosts(prev => [newPost, ...(Array.isArray(prev) ? prev : [])]);
+                    return { success: true, post: newPost };
+                } else {
+                    console.warn("⚠️ Response received but no post data found:", response);
+                    await fetchPosts();
+                    return { success: true, post: response };
+                }
+            } else {
+                return { success: false, message: 'No response from server' };
             }
         } catch (error) {
-            console.error("Error creating post:", error);
-            return { success: false, error: error.message || "Failed to create post" };
+            console.error('❌ Error creating post:', error);
+            console.error('Error details:', error.message);
+            console.error('Error status:', error.status);
+            console.error('Error data:', error.data);
+            return {
+                success: false,
+                message: error.message || 'Failed to create post'
+            };
         }
     };
 
@@ -284,7 +340,6 @@ export function DataProvider({ children }) {
             const response = await api.authPut("/user/profile", data, token);
             console.log("📝 Profile update response:", response);
 
-            // Your backend returns: { success: true, message: "...", user: {...} }
             if (response && response.success) {
                 return response;
             }
@@ -302,7 +357,6 @@ export function DataProvider({ children }) {
             const response = await api.authPostFormData("/user/avatar", formData, token);
             console.log("🖼️ Avatar upload response:", response);
 
-            // Your backend returns: { success: true, message: "...", avatar_url: "..." }
             if (response && response.success) {
                 return response;
             }
@@ -312,14 +366,14 @@ export function DataProvider({ children }) {
             return { success: false, error: error.message };
         }
     };
+
     const uploadCover = async (file) => {
         try {
             const formData = new FormData();
-            formData.append("cover_image", file); // Note: the field name is 'cover_image'
+            formData.append("cover_image", file);
             const response = await api.authPostFormData("/user/cover", formData, token);
             console.log("🖼️ Cover upload response:", response);
 
-            // Your backend returns: { success: true, message: "...", cover_url: "..." }
             if (response && response.success) {
                 return response;
             }
@@ -329,12 +383,12 @@ export function DataProvider({ children }) {
             return { success: false, error: error.message };
         }
     };
+
     const getCurrentUser = async () => {
         try {
             const data = await api.authGet("/user", token);
             console.log("Current user response:", data);
 
-            // Your backend returns: { success: true, user: { ... } }
             if (data && data.success && data.user) {
                 return data.user;
             }
